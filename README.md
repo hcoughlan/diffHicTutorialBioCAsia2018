@@ -10,6 +10,7 @@ Additional resources for the workshop:
 Requires R and bioconductor. Packages in R required:
 ```
 library(diffhic)
+library(edgeR)
 library(csaw)
 library(BSgenome.Mmusculus.UCSC.mm10)
 ```
