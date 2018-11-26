@@ -16,6 +16,6 @@ library(BSgenome.Mmusculus.UCSC.mm10)
 
 Files for the tutorial are availabe from:
 * [Count data](http://bioinf.wehi.edu.au/edgeR/diffHic_tutorial.RData) - InteractionSet objects
-* [CD4T+ T cells](http://bioinf.wehi.edu.au/edgeR/CD4T1chr2_chr11_chr12.h5 - HDF5 for select chromosomes
-* [Grans cells](http://bioinf.wehi.edu.au/edgeR/GW1chr2_chr11_chr12.h5 - HDF5 for select chromosomes
-* [Mature B cells](http://bioinf.wehi.edu.au/edgeR/MATB1chr2_chr11_chr12.h5 - HDF5 for select chromosomes
+* [CD4T+ T cells](http://bioinf.wehi.edu.au/edgeR/CD4T1chr2_chr11_chr12.h5) - HDF5 for select chromosomes
+* [Grans cells](http://bioinf.wehi.edu.au/edgeR/GW1chr2_chr11_chr12.h5) - HDF5 for select chromosomes
+* [Mature B cells](http://bioinf.wehi.edu.au/edgeR/MATB1chr2_chr11_chr12.h5) - HDF5 for select chromosomes
