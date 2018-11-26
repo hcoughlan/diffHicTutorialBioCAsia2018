@@ -317,7 +317,7 @@ y
 ## Unsupervised clustering
 An effective method to explore the data is with a multi-dimensional scaling plot (MDS). The function plotMDS from the limma package draws a MDS plot of the samples in which distances correspond to leading log-fold-changes between each pair of samples. The leading log-fold-change is the average (root-mean-square) of the largest absolute log-fold changes between each pair. This plot can be viewed as a type of unsupervised clustering. Here we plot an MDS for the normalised cpms for the top 50,000 bins:
 
-```{r, fig.height=6,fig.width=}
+```{r, fig.height=6,fig.width=6}
 par(mfrow=c(1,1))
 group.col <-c("green","green","red","red","blue","blue")
 plotMDS(normc, col=group.col,pch = as.numeric(19), top=50000, cex=2, dim.plot = c(1,2), main = "HiC MDS plot, 50000")
