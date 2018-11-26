@@ -12,7 +12,7 @@ output:
 
 # Introduction
 
-The following outlines a differential interaction analysis of HiC data. The purpose is to demonstrate the Bioconductor package diffHic (Lun & Smyth, BMC Bioinformatics, 2015)[https://doi.org/10.1186/s12859-015-0683-0]. For further information refer to the Bioconductor page: https://bioconductor.org/packages/release/bioc/html/diffHic.html. This tutorial will follow sections of the users guide. 
+The following outlines a differential interaction analysis of HiC data. The purpose is to demonstrate the Bioconductor package diffHic created by Aaron Lun and Gordon Smyth (Lun & Smyth, BMC Bioinformatics, 2015)[https://doi.org/10.1186/s12859-015-0683-0]. For further information refer to the Bioconductor page: https://bioconductor.org/packages/release/bioc/html/diffHic.html. This tutorial will follow sections of the users guide. 
 
 The example data set we are using is from GEO GSE99151 (Johanson et al, Nature Immunology, 2018)[https://doi.org/10.1038/s41590-018-0234-8]. The dataset consists of three different mouse immune cell types collected from two different biological replicates. The aim of the analysis is to find lineage defining chromatin structure that is unique to the different cell types. 
 
