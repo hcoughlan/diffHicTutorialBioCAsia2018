@@ -12,7 +12,7 @@ output:
 
 # Introduction
 
-The following outlines a differential interaction analysis of HiC data. The purpose is to demonstrate the Bioconductor package diffHic created by Aaron Lun and Gordon Smyth (Lun & Smyth, BMC Bioinformatics, 2015)[https://doi.org/10.1186/s12859-015-0683-0]. For further information refer to the Bioconductor page: https://bioconductor.org/packages/release/bioc/html/diffHic.html. This tutorial will follow sections of the users guide. 
+The following outlines a differential interaction analysis of HiC data. The purpose is to demonstrate the Bioconductor package diffHic (Lun & Smyth, BMC Bioinformatics, 2015)[https://doi.org/10.1186/s12859-015-0683-0]. For further information refer to the Bioconductor page: https://bioconductor.org/packages/release/bioc/html/diffHic.html. This tutorial will follow sections of the users guide. 
 
 The example data set we are using is from GEO GSE99151 (Johanson et al, Nature Immunology, 2018)[https://doi.org/10.1038/s41590-018-0234-8]. The dataset consists of three different mouse immune cell types collected from two different biological replicates. The aim of the analysis is to find lineage defining chromatin structure that is unique to the different cell types. 
 
@@ -144,7 +144,7 @@ legend("topright", c("inward", "outward", "same"), col=c("darkgreen", "red", "bl
 ```
 Refer to slides for plot.
 
-If different pieces of DNA were randomly ligated together, one would expect to observe equal proportions of all strand orientations ( +/+, -/-, +/- and -/+).  At high insert sizes, the distributions converge for all strand orientations which is consistent with random ligation between two separate restriction fragments. At lower insert sizes, spikes are observed in the outward (sometimes) and inward distributions due to self circularization and dangling ends. Thresholds should be chosen in prunePairs to remove these spikes.
+If different pieces of DNA were randomly ligated together, one would expect to observe equal proportions of all strand orientations ( +/+, -/-, +/- and -/+).  At high insert sizes, the distributions converge for all strand orientations which is consistent with random ligation between two separate restriction fragments. At lower insert sizes, spikes are observed in the outward (sometimes) and inward distributions due to self circularisation and dangling ends. Thresholds should be chosen in prunePairs to remove these spikes.
 
 Finally, we can merge ant technical replicates into a single library with the mergePairs function.
 
@@ -167,7 +167,7 @@ load("data/diffHic_tutorial.RData")
 ```
 
 ## Counting the read pair data into interactions
-Before analysis, the read pairs in a each HiC library must be summarised into a count for each interaction. This count is used as an experimental measure of the interaction intensity. Each pairwise interaction is parameterized by two genomic intervals (anchors) representing the interacting loci. The count for that interaction is defined as the number of read pairs with one read mapping to each of the intervals.
+Before analysis, the read pairs in a each HiC library must be summarised into a count for each interaction. This count is used as an experimental measure of the interaction intensity. Each pairwise interaction is parameterised by two genomic intervals (anchors) representing the interacting loci. The count for that interaction is defined as the number of read pairs with one read mapping to each of the intervals.
 
 To counts the hdf5 files into bins we use the param index. However first we will restrict the param object to only chromosomes of interest (i.e. exclude the mitochondrial genome and unassigned contigs). We also wish to exclude blacklisted regions according to the ENCODE blacklist for mm10 [https://sites.google.com/site/anshulkundaje/projects/blacklists]. This object was already loaded into the workspace.
 
@@ -263,7 +263,7 @@ sum(keep)
 This is just one method of filtering HiC data which I have found to be a good general approach. 
  
 ## Normalisation
-Many different methods of normalisation can be explored to remove biases in the HiC data. It is important to remember that this is a differential type analysis therefore we do not need to correct the counts. Instead diffHic computes offsets that are used in fitting generalized linear models (GLMs) to the data.
+Many different methods of normalisation can be explored to remove biases in the HiC data. It is important to remember that this is a differential type analysis therefore we do not need to correct the counts. Instead diffHic computes offsets that are used in fitting generalised linear models (GLMs) to the data.
 
 Trended biases can be introduced to the libraries through the complicated experimental protocol of HiC (such as cross-linking efficieny, ligation). Scalling methods such TMM normalisation are too simplistic to deal with the complex biases observed in real HiC data. 
 
@@ -287,7 +287,7 @@ normc <- log2(assay(data.offs,1)+0.5) - assay(data.offs,2)/log(2)
 lib.names <- targets$library
 for (lib in c(2:6)) {
     par(mfrow=c(1,2))
-    for (mode in c("raw", "normalized")) {
+    for (mode in c("raw", "normalised")) {
         if (mode=="raw") {
             adj.counts <- adjc
         } else {
@@ -317,7 +317,7 @@ y
 ## Unsupervised clustering
 An effective method to explore the data is with a multi-dimensional scaling plot (MDS). The function plotMDS from the limma package draws a MDS plot of the samples in which distances correspond to leading log-fold-changes between each pair of samples. The leading log-fold-change is the average (root-mean-square) of the largest absolute log-fold changes between each pair. This plot can be viewed as a type of unsupervised clustering. Here we plot an MDS for the normalised cpms for the top 50,000 bins:
 
-```{r, fig.height=6,fig.width=6}
+```{r, fig.height=6,fig.width=}
 par(mfrow=c(1,1))
 group.col <-c("green","green","red","red","blue","blue")
 plotMDS(normc, col=group.col,pch = as.numeric(19), top=50000, cex=2, dim.plot = c(1,2), main = "HiC MDS plot, 50000")
@@ -357,7 +357,7 @@ BCV
 
 This is a reasonable BVC for HiC data. We can also visualise the BCV for every bin pair and examine the trend as a function of abundance. 
 
-A plot of the average $\log_2$-count per million (CPM) versus the BCV for each bin pair is shown below. This plot visualizes how bin pair variation changes between replicate samples changes as abundance increases. Ideally we want the BCV to decrease as abundance increases. 
+A plot of the average $\log_2$-count per million (CPM) versus the BCV for each bin pair is shown below. This plot visualises how bin pair variation changes between replicate samples changes as abundance increases. Ideally we want the BCV to decrease as abundance increases. 
 ```{r, fig.height=6,fig.width=6}
 par(mfrow=c(1,1))
 plotBCV(dispersion, ylim=c(0.034,0.08))
@@ -466,7 +466,7 @@ head(stat.CD4T.vs.MB)
 # Exercise: Differential interactions between CD4+ T cells and granulocytes
 
 # Visualisation of differential interactions with plaid plots
-Plaid plots are widely used to visualize the distribution of read pairs in the interaction space. In these plots, each axis is a chromosome segment. Each “pixel” represents an interaction between the corresponding intervals on each axis. The color of the pixel is proportional to the number of read pairs mapped between the interacting loci. diffHic provides two different functions to produce plaid plots from the hd5 file of a library.
+Plaid plots are widely used to visualise the distribution of read pairs in the interaction space. In these plots, each axis is a chromosome segment. Each “pixel” represents an interaction between the corresponding intervals on each axis. The color of the pixel is proportional to the number of read pairs mapped between the interacting loci. diffHic provides two different functions to produce plaid plots from the hd5 file of a library.
 
 We are using smaller hd5f files for plotting:
 ```{r}
@@ -545,4 +545,3 @@ direct$threshold
 ```{r} 
 sessionInfo()
 ```
-
