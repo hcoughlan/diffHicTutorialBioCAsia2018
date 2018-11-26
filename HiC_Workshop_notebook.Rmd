@@ -1,0 +1,548 @@
+---
+title: "Bioconductor Hand-on Training Data: Differential analysis of HiC data with diffHic"
+author: "Hannah Coughlan"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true  
+    theme: cerulean
+    number_sections: yes
+---
+
+# Introduction
+
+The following outlines a differential interaction analysis of HiC data. The purpose is to demonstrate the Bioconductor package diffHic (Lun & Smyth, BMC Bioinformatics, 2015)[https://doi.org/10.1186/s12859-015-0683-0]. For further information refer to the Bioconductor page: https://bioconductor.org/packages/release/bioc/html/diffHic.html. This tutorial will follow sections of the users guide. 
+
+The example data set we are using is from GEO GSE99151 (Johanson et al, Nature Immunology, 2018)[https://doi.org/10.1038/s41590-018-0234-8]. The dataset consists of three different mouse immune cell types collected from two different biological replicates. The aim of the analysis is to find lineage defining chromatin structure that is unique to the different cell types. 
+
+The samples are:
+
+\begin{enumerate}
+\item 2x mature B cells
+\item 2x granulocytes
+\item 2x CD4+ T cells
+\end{enumerate}
+
+We will briefly cover the pre-processing of the HiC data (alignment of reads, processing the bam files and removal of artefacts) but we will concentrate on the differential analysis in R. 
+
+# Pre-processing of the data
+Here we will show example an example for processing HiC fastq files through to the input index file for the differential analysis pipeline. 
+
+The first step in the analysis is to align the fastq files to a reference genome with Bowtie2. 
+
+## Producing a bam file
+A significant proportion of a HiC library can be chimeric reads. Chimeric reads result from sequencing over the ligation junction between two restriction fragments. In other words, a chimeric read is from two distinct genomic loci. Therefore to accurately align such read pairs to the genome the ligation signature of the restriction enzyme (GATCGATC for MboI) is used to split chimeric reads with cutadapt. The read is split into two segments at the centre of the signature and each segment is then aligned separately to the reference genome using Bowtie2.
+
+diffHic uses a python script to perform chimeric alignment by calling cutadapt and Bowtie2. The python script can be found at: 
+```{r}
+system.file("python", "presplit_map.py", package="diffHic", mustWork=TRUE)
+```
+To run the script the command is:
+python presplit_map.py -G ~/genome/mm10/bowtie2/mm10 -1 read1.fastq -2 read2.fastq --sig GATCGATC --cmd bowtie2 -o aligned.bam
+
+Here -G is the path to the Bowtie2 index for the mm10 reference genome. 
+
+For the aligned bam file, the Picard software suite [https://broadinstitute.github.io/picard/] should be used to synchronize mate pair information, mark duplicate reads and sort the bam file by read name.
+
+## Mapping reads to restriction fragments
+HiC is based on ligation of interacting DNA fragments after digestion with a restriction enzyme. The resolution of HiC data is inherently limited by the frequency of restriction sites and the size of the restriction fragments. Therefore we report the read alignment location in terms of the restriction fragment to which that read was mapped. 
+
+The restriction fragments can be obtained with the cutGenome function, as shown below for the mouse genome after digestion with the MboI restriction enzyme:
+```{r}
+library(diffHic)
+library(BSgenome.Mmusculus.UCSC.mm10)
+hs.frag<-cutGenome(BSgenome.Mmusculus.UCSC.mm10, "GATC",4)
+hs.frag
+```
+
+We then store the restriction fragment in a Param object. This simplifies the coordinates of the analysis and we will use this object later in the analysis.
+```{r}
+hs.param<-pairParam(hs.frag)
+hs.param
+```
+
+Next we will map aligned read pairs to a restriction fragment. The preparePairs functions converts the read position in the bam file into an index that points to a restriction fragment. The output is a HDF5 file that contains a pair of indices (anchors) for each read pair in a library. The HDF5 file contains a dataFrame for every combination of chromosomes in the reference genome. 
+
+We run the preparePairs functions on a bam file using the Param object and various flags. We can remove duplicate reads here (dedup=TRUE) and filter reads based on mapping quality score (minq). 
+
+```{r,eval=FALSE}
+diagnostics <- preparePairs("aligned.bam", hs.param, file="hdf5_file.h5", dedup=TRUE, minq=10, chim.dist=800)
+```
+
+Along with the hdf5 file the function gives various diagnostics about the library. These values indicate the quality of the library. The different categories are:
+```{r, eval=FALSE}
+names(diagnostics)
+## [1] "pairs" "same.id" "singles" "chimeras"
+```
+
+The pairs category shows how many read pairs were mapped to restriction fragments (mapped) and how many were removed as duplicates (marked).
+```{r,eval=FALSE}
+diagnostics$pairs
+## total marked filtered mapped
+## 7068675 103594 1532760 5460120
+```
+
+The same.id category is read pairs that have been mapped to the same restriction fragment and are considered artefacts (self-circles and dangling ends). Dangling ends are inward-facing read pairs mapped to the same fragment and are usually formed from sequencing of the unligated restriction fragments. Self-circles are outward-facing read pairs that are formed when two ends of the same restriction fragment ligate to one another. Both self-circles and dangling end reads are removed. 
+```{r,eval=FALSE}
+diagnostics$same.id
+## dangling self.circle
+## 425219 138248
+```
+
+Chimeric reads are placed in their own category and have two separate alignments for each of the reads. Only the 5 prime end of the reads is used to determine the restriction fragment index. Invalid chimeric pairs are where the 3 prime end of the chimeric read disagrees with the mapping location of the 5 prime location of the other read mate. Invalid proportion can be used as an empirical measure of the mapping error rate and high error rates may be indicative of a fault in the mapping pipeline. In general, we will not remove the chimeric reads from the analysis.
+```{r,eval=FALSE}
+diagnostics$chimeras
+## total mapped multi invalid
+## 2495159 1725843 1040864 67989
+```
+
+## Filtering libraries for artefacts
+The prunePairs function removes read pairs that we suspect are additional artefacts.
+```{r, eval= FALSE}
+prunePairs("hdf5_file.h5", hs.param, file.out="hdf5_file_trimmed.h5", max.frag=700, min.inward=1000, min.outward=16000)
+
+## total length inward outward retained
+## 4896653 870339 94644 82964 3860024
+```
+
+The max.frag is the upper threshold for the inferred length of the sequencing fragment for a pair of reads. Large fragment lengths are indicative of off-site cleavage by the restriction enzyme. The length of the sequencing fragment is computed by summing the distance between the mapping location of the 5 prime end and the nearest restriction site on the 3 prime side for each read in the pair. A value for max.frag can be chosen by examining the distribution of inferred fragment lengths from getPairData:
+```{r,eval=FALSE}
+diags <- getPairData("hdf5_file.h5", hs.param)
+
+hist(diags$length[diags$length < 1500], ylab="Frequency", xlab="Spacing (bp)", main="", col="grey80")
+```
+Refer to slides for plot.
+
+The min.inward and min.outward threshold values remove read pairs based on insert size and on the strand orientation of the individual reads. The insert size is defined as the linear distance between two paired reads on the same chromosome and the strand orientation for a read pair refers to the combination of strands for the two alignments. The min.inward parameter removes inward-facing intra-chromosomal read pairs where the insert size is less than the specified value and the min.outward parameter does the same for outward-facing intra-chromosomal read pairs. These read pairs are technical artefacts that are (incorrectly) retained by preparePairs, as the two reads involved are mapped to different restriction fragments. 
+
+The min.inward and min.outward threshold values can be determined using strand orientation plots where we plot the distributions as a function of insert size.
+```{r, eval=FALSE}
+min.inward<- 1000
+min.outward<- 16000
+
+llinsert <- log2(diags$insert + 1L) 
+intra <- !is.na(llinsert) 
+
+breaks <- seq(min(llinsert[intra]), max(llinsert[intra]), length.out=30) 
+inward <- hist(llinsert[diags$orientation==1L], plot=FALSE, breaks=breaks) 
+outward <- hist(llinsert[diags$orientation==2L] ,plot=FALSE, breaks=breaks) 
+samestr <- hist(llinsert[diags$orientation==0L | diags$orientation==3L], plot=FALSE, breaks=breaks) 
+samestr$counts <- samestr$counts/2
+
+ymax <- max(inward$counts, outward$counts, samestr$counts)/1e6 
+xmax <- max(inward$mids, outward$mids, samestr$mids) 
+xmin <- min(inward$mids, outward$mids, samestr$mids)
+
+plot(0,0,type="n", xlim=c(xmin, xmax), ylim=c(0, ymax),xlab=expression(log[2]~"[insert size (bp)]"), ylab="Frequency (millions)") 
+lines(inward$mids, inward$counts/1e6, col="darkgreen", lwd=2) 
+abline(v=log2(min.inward), col="darkgrey") 
+lines(outward$mids, outward$counts/1e6, col="red", lwd=2) 
+abline(v=log2(min.outward), col="darkgrey", lty=2) 
+lines(samestr$mids, samestr$counts/1e6, col="blue", lwd=2) 
+legend("topright", c("inward", "outward", "same"), col=c("darkgreen", "red", "blue"), lwd=2)
+```
+Refer to slides for plot.
+
+If different pieces of DNA were randomly ligated together, one would expect to observe equal proportions of all strand orientations ( +/+, -/-, +/- and -/+).  At high insert sizes, the distributions converge for all strand orientations which is consistent with random ligation between two separate restriction fragments. At lower insert sizes, spikes are observed in the outward (sometimes) and inward distributions due to self circularization and dangling ends. Thresholds should be chosen in prunePairs to remove these spikes.
+
+Finally, we can merge ant technical replicates into a single library with the mergePairs function.
+
+# Data exploration
+Now we have hdf5 libraries that have been processed for artefacts and technical replicates merged. We can move onto the analysis. This workflow is a good starting point for an analysis but as every dataset is unique each analysis will need to be unique. Filtering and bin size are often parameters that need to be explored.
+
+## The targets file
+The first step to make the analysis easier to follow, is to create a targets dataframe which contains information about the sequenced libraries.  
+```{r}
+library<-c("CD4T1","CD4T2","GW1","GW2","MATB1","MATB2")
+group<-c("CD4T","CD4T","Gran","Gran","MB","MB")
+files<-paste0("data/",library, ".h5")
+targets<-data.frame(library,group, files)
+targets
+```
+
+We are also are now going to load in some data objects that we will use in our analysis as they will take a few hours to generate from the beginning. I have included the command to generate the objects in the analysis. 
+```{r}
+load("data/diffHic_tutorial.RData")
+```
+
+## Counting the read pair data into interactions
+Before analysis, the read pairs in a each HiC library must be summarised into a count for each interaction. This count is used as an experimental measure of the interaction intensity. Each pairwise interaction is parameterized by two genomic intervals (anchors) representing the interacting loci. The count for that interaction is defined as the number of read pairs with one read mapping to each of the intervals.
+
+To counts the hdf5 files into bins we use the param index. However first we will restrict the param object to only chromosomes of interest (i.e. exclude the mitochondrial genome and unassigned contigs). We also wish to exclude blacklisted regions according to the ENCODE blacklist for mm10 [https://sites.google.com/site/anshulkundaje/projects/blacklists]. This object was already loaded into the workspace.
+
+```{r} 
+chrom <- sprintf('chr%s',c(1:19,"X","Y"))
+hs.param <- reform(hs.param,restrict=chrom, discard=blacklist)
+hs.param
+```
+
+Now we partition the genome into contiguous non-overlapping bins of constant size where we define each interaction as a pair of bins (anchors). Counting of the read pairs between the anchors is performed for multiple libraries using the squareCounts function:
+
+```{r, eval=FALSE} 
+bin.size <- 100e3
+data<-squareCounts(targets$files, hs.param, width=bin.size, filter=10, restrict.regions = TRUE) 
+```
+
+Here the bin width is defined as 100 kbp and a filter of 10 is used which will remove as pairwise interactions that are less than 10 counts. Again we have already loaded the data object into the workspace as this step takes ~30 minutes.
+```{r} 
+bin.size <- 100e3
+data
+```
+
+This generates an InteractionSet object containing information for multiple genomic interactions were each row corresponds to an interaction (bin pair):
+
+```{r}
+head(interactions(data))
+```
+We can also access each of the anchors:
+```{r}
+head(anchors(data, type="first"))
+head(anchors(data, type="second"))
+```
+
+The assay entry contains a matrix of counts for each interaction where each column represents a library:
+```{r}
+head(assay(data))
+```
+
+The object also contains the total number of read pairs for each library:
+```{r}
+data.frame(File=targets$library, Total=data$totals)
+```
+
+The squareCounts functions has multiple arguments for changing the analysis. We use restrict.regions = TRUE to exclude the regions we set up in the param object. The filter option removes any interactions (a row of the count matrix) where the sum across the row is below this threshold. Most likely, low count numbers are uninformative and this greatly reduces the size of the InteractionSet object. 
+
+The most important parameter for the entire analysis is the width argument which is the bin size. This determines the spatial resolution of the analysis and the features that we are likely to find. Small bins have great spatial resolution, however if the libraries were not sequenced deeply enough the counts of the interactions will be too low to have statistical power and capture features of the chromatin.
+```{r}
+head(regions(data))
+```
+
+1 Mpb will capture broad features and is a good place to start. Here we will use 100 kbp as the libraries are over 100 million reads.
+
+## Filtering interactions
+Filtering is performed to remove uninteresting interactions. This will decrease the need for computational resources, decrease the effect of multiplicity correction and increase the power of the analysis. There are multiple strategies for filtering HiC data that are outlines in the diffHic users guide. Here we will show an approach that aims to remove low abundance interactions. 
+
+The simplest definition of an “uninteresting” interaction is that resulting from non-specific ligation. These are represented by low-abundance bin pairs where no underlying contact is present to drive ligation between the corresponding bins. The magnitude of non-specific ligation is empirically estimated by assuming that most interchromosomal contacts are not genuine. The median abundance across inter-chromosomal bin pairs is used as an estimate of the non-specific ligation rate. 
+
+The filter threshold is estimated from the inter-chromosomal interactions of a larger bin dataset with no prior filtering. The larger counts produce a more precise estimate of the uninteresting ligation. 
+```{r, eval=FALSE}
+background <- squareCounts(targets$files, hs.param, width=1e6)
+```
+We already have this object in the workspace.
+
+We then use the filterDirect function to filter our data using the larger bin dataset as a reference.
+```{r}
+direct <- filterDirect(data, reference=background)
+direct$threshold
+```
+
+We also set the filter threshold above the level of non-specific ligation by adding a fold change requirement, here $\log_2$(2). We can plot a histogram of the abundances in the reference dataset and the dataset of interest.
+```{r, fig.width=12, fig.height=5}
+par(mfrow=c(1,2))
+hist(direct$ref$abundances, breaks=100)
+abline(v=direct$ref$threshold, lwd=2, col="blue") # Background estimate
+abline(v=direct$ref$threshold+log2(10), lwd=2, col="red") # Threshold
+
+hist(direct$abundances, breaks=100)
+abline(v=direct$ref$threshold+log2(10), lwd=2, col="red") # Threshold
+```
+We can now see how many bin pairs will be retained:
+```{r}
+high.ab <- direct$abundances > direct$threshold +log2(10)
+summary(high.ab)
+```
+
+We will now filter the data by subsetting the data object. We also filter out the diagonal elements (pairs in the same bin) as these bins typically contain artefacts.  
+```{r}
+keep <- high.ab & filterDiag(data, by.diag=1L)
+data <- data[keep,]
+sum(keep)
+```
+ 
+This is just one method of filtering HiC data which I have found to be a good general approach. 
+ 
+## Normalisation
+Many different methods of normalisation can be explored to remove biases in the HiC data. It is important to remember that this is a differential type analysis therefore we do not need to correct the counts. Instead diffHic computes offsets that are used in fitting generalized linear models (GLMs) to the data.
+
+Trended biases can be introduced to the libraries through the complicated experimental protocol of HiC (such as cross-linking efficieny, ligation). Scalling methods such TMM normalisation are too simplistic to deal with the complex biases observed in real HiC data. 
+
+Trended biases can inflate the variance estimates or fold-changes for some pairs. These type of biases can be eliminated with a non-linear normalisation and here we will use LOESS normalisation. The normOffsetrs function from the csaw package is used to compute an offset term for each bin pair in each library. 
+
+Later in the analysis we will fit a GLM to the counts, a large offset for a bin pair in a library is equivalent to downscaling the corresponding count relative to the counts of other libraries. The matrix of offsets has the same dimensions as the count matrix and is stored as an element of the assays slot of the InteractionSet object.
+```{r} 
+library(csaw)
+data.offs <- normOffsets(data, type="loess")
+head(assay(data.offs,2))
+```
+
+Trended biases in the data can manifest as an abundance dependent trend in a MA plots between libraries. By viewing a plot before and after normalisation the success of the process can be assessed.
+
+```{r}
+library(edgeR)
+ab <- aveLogCPM(asDGEList(data))
+o <- order(ab)
+adjc <- cpm(asDGEList(data), log=TRUE)
+normc <- log2(assay(data.offs,1)+0.5) - assay(data.offs,2)/log(2)
+lib.names <- targets$library
+for (lib in c(2:6)) {
+    par(mfrow=c(1,2))
+    for (mode in c("raw", "normalized")) {
+        if (mode=="raw") {
+            adj.counts <- adjc
+        } else {
+            adj.counts <- normc
+        }
+        mval <- adj.counts[,1]-adj.counts[,lib]
+        smoothScatter(ab, mval, xlab="A", ylab="M", cex=0.5, main=sprintf("%s vs. %s (%s)",
+            lib.names[1], lib.names[lib], mode))
+        lfit <- loessFit(x=ab, y=mval)
+        lines(ab[o], lfit$fitted[o], col="red")
+    }
+}
+```
+
+Here we can see the normalisation has been successful as the trended biases have been removed.
+
+We can now create a DGEList object from the InteractionSet object that we will use for the rest of the analysis. We will also add sample labels.
+```{r}
+y <- asDGEList(data.offs)
+rownames(y$samples)<-targets$library
+colnames(y$counts)<-targets$library
+y$samples$group<-targets$group
+levels(y$samples$group)<-unique(y$samples$group)
+y
+```
+
+## Unsupervised clustering
+An effective method to explore the data is with a multi-dimensional scaling plot (MDS). The function plotMDS from the limma package draws a MDS plot of the samples in which distances correspond to leading log-fold-changes between each pair of samples. The leading log-fold-change is the average (root-mean-square) of the largest absolute log-fold changes between each pair. This plot can be viewed as a type of unsupervised clustering. Here we plot an MDS for the normalised cpms for the top 50,000 bins:
+
+```{r, fig.height=6,fig.width=}
+par(mfrow=c(1,1))
+group.col <-c("green","green","red","red","blue","blue")
+plotMDS(normc, col=group.col,pch = as.numeric(19), top=50000, cex=2, dim.plot = c(1,2), main = "HiC MDS plot, 50000")
+legend("topleft", legend = unique(group), col =unique(group.col), pch = as.numeric(15), cex=1.0, title.col = "black")
+```
+
+We can see the samples are separated by cell type with the biological replicates clustering together. 
+
+# Differential analysis
+We now move onto the differential analysis of the dataset. The differential analysis in diffHic is based on the statistical framework in the edgeR package (Robinson et al, Bioinformatics, 2010). I recommend reading the edgeR user guide for more information on the individual functions [https://bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf] and reading the diffHic paper for a general overview of the modelling. 
+
+The differential analysis has three main steps: estimating the variability in the data, fitting a GLM to the counts and performing testing for significant differences between the bin pairs. 
+
+## The design matrix
+The differential analysis requires a design matrix that mathematically represents the design of the experiment. It is used to specify the linear models required for the differentially expression analysis.
+```{r} 
+design <- model.matrix(~0 + group)
+rownames(design) <- targets$library
+design
+```
+
+## Modelling technical and biological variation
+An estimation of the variation in the bin pairs is used during testing to reduce the significance of any detected differences when the counts are highly variable for a given bin pair. The variability of the bin pair counts between replicate samples is modelled using the quasi-likelihood (QL) methods implemented in the edgeR package. The counts are assumed to follow quasi-negative-binomial distributions i.e., they are negative binomial (NB) distributed with an additional technical overdispersion parameter. So we end up with a bin pair dispersion that has two components: the NB dispersion (biological coefficient of variation) and the QL dispersion (technical variation). We estimate both in two steps.   
+
+The biological coefficient of variation (BCV) is estimated by fitting an abundance-dependent trend to the NB dispersions across all bin pairs. The NB dispersions represent the level of biological variability between replicates and the square root of NB dispersions is the BCV, i.e., the coefficient of variation with which the count for each bin pair varies between the replicate samples, averaged over bin pairs with similar abundances. It represents the coefficient of variation that would be observed in the counts if the sequencing depth was sufficiently large (i.e. no technical variation).
+
+We estimate the NB dispersions with the estimateDisp function with robust=TRUE to protect from outliners.
+```{r} 
+dispersion <- estimateDisp(y, design,robust=TRUE)
+```
+
+The BCV is then determined from the overall dispersion as: 
+```{r} 
+BCV <- sqrt(dispersion$common.dispersion)
+BCV
+```
+
+This is a reasonable BVC for HiC data. We can also visualise the BCV for every bin pair and examine the trend as a function of abundance. 
+
+A plot of the average $\log_2$-count per million (CPM) versus the BCV for each bin pair is shown below. This plot visualizes how bin pair variation changes between replicate samples changes as abundance increases. Ideally we want the BCV to decrease as abundance increases. 
+```{r, fig.height=6,fig.width=6}
+par(mfrow=c(1,1))
+plotBCV(dispersion, ylim=c(0.034,0.08))
+```
+
+The QL dispersion is estimated in the GLM fitting which we will now perform. 
+
+## Fitting the GLM
+Counts for each bin pair are modelled using the GLM methods implemented in the edgeR package and takes into account the sequencing depth and the normalisation offsets we calculated previously. 
+
+The QL dispersion for each bin pair is estimated from the deviance of the fitted GLM. The QL dispersion can account for heteroskedasticity between bin pairs. QL dispersion is estimated with the glmQLFit. The information is shared between bin pairs using an empirical Bayes (EB) approach. Per-bin pair QL estimates are shrunk towards a common trend across all bin pairs. Again, it is important to use the robust=TRUE argument as this protects against any large outliners.
+```{r, fig.height=6,fig.width=6}
+par(mfrow=c(1,1))
+fit <- glmQLFit(dispersion, design, robust=TRUE)
+plotQLDisp(fit)
+```
+
+Now that we have modelled the counts, we can move onto the testing between groups. 
+
+## Testing for significant differential interactions
+Here we will look at the differences between each sample using the QL fit performed previously. Using the glmQLFTest function, a QL F-test is performed for each bin pair to identify significant differences. 
+
+In a diffHic analysis, many bin pairs are tested for signifcant differences across the interaction space (100s of 1000s). Correction for multiple testing is neccessary to avoid excessive detection of spurious differences. For genome wide analyses, this correction is typically performed by controlling the false discovery rate (FDR) with the Benjamini-Hochberg (BH) method. Here we will set an FDR cut-off as 0.05.
+
+Before we can perform the tests, we need to set up the contrasts between the different groups. What do we want to test?
+```{r}
+contrast=makeContrasts(TvsMB=c(1,0,-1),
+                       TvsG=c(1,-1,0),
+                       MBvsG=c(0,-1,1), levels=design)
+
+contrast
+```
+
+```{r}
+contrast=makeContrasts(TvsMB=groupCD4T-groupMB,
+                       TvsG=groupCD4T-groupGran,
+                       MBvsG=groupMB-groupGran, levels=design)
+contrast
+```
+
+### Differential interactions between CD4+ T cells and mature B cells
+First we will test for differences between the T cells and the B cells. We will then use the topTags functions to adjust the p-value for multiple testing.
+```{r} 
+results.CD4T.vs.MB <- glmQLFTest(fit, contrast=contrast[,"TvsMB"])
+di.CD4T.vs.MB <- topTags(results.CD4T.vs.MB, sort.by="none", n=Inf)$table
+is.di <- di.CD4T.vs.MB$FDR <= 0.05
+
+summary(is.di)
+```
+
+Interpretation of the individual DIs is complicated by spatial dependencies between adjacent bin pairs in features such as TADs. If many adjacent bin pairs were separately reported as DIs, this would lead to unnecessary redundancy in the results. To mitigate this effect, adjacent bin pairs can be aggregated into larger clusters to reduce redundancy. However care needs to be taken when controlling the FDR for the whole cluster. 
+
+The FDR across clusters is not the same as that across bin pairs. The former is more useful as the results are usually interpreted in terms of clusters, where each cluster corresponds to one interaction event. However, the FDR across bin pairs is easier to control by applying the BH method directly to the bin pair p-values. Treating the FDR across bin pairs as that across clusters is usually inappropriate and results in loss of FDR control. The diffHic package provides several methods for controlling the FDR. 
+
+I will show a strategy which is recommended for a routine analysis that is based on clustering significant bin pairs. 
+
+### Clustering of the differential interactions
+We will perform the controlling of the FDR based on the clustering based on significant bin pairs. Here the interaction space is often dominated by high-abundance structural features like domains and compartments. In such high-density areas, too many bin pairs may be retained after independent filtering on abundance.  
+
+The diClusters function only clusters those bin pairs that are significantly different and attempts to control the cluster level FDR below target=0.05. For further details on the cluster level FDR refer to the diffHic users guide.
+```{r}
+cluster.CD4T.vs.MB <- diClusters(data[,c(1,2,5,6)], results.CD4T.vs.MB$table, target=0.05, cluster.args=list(tol=1, upper=bin.size*10))
+
+length(cluster.CD4T.vs.MB$interactions)
+head(cluster.CD4T.vs.MB$interactions)
+```
+We have now reduced the number of DIs we are reporting, however, the DIs will now be of varying size.
+
+The identities of the bin pairs in each cluster are returned in the indices field of the output: 
+```{r}
+head(cluster.CD4T.vs.MB$indices[[1]][!is.na(cluster.CD4T.vs.MB$indices[[1]])], n=200)
+```
+
+Indices can be used to compute additional statistics for each cluster using the combineTests and getBestTest functions in csaw. getBestTest will identify the bin pair in the cluster with the lowest p-value, which is useful for finding the strongest changes in large clusters. Users are advised to ignore the p-value and FDR fields as these assume independent clustering.  The combined p-value from combineTests is stored but is only used for sorting and should not be interpreted as a significance measure. We combine all the important statistics.
+
+```{r}
+tabcom <- combineTests(cluster.CD4T.vs.MB$indices[[1]], results.CD4T.vs.MB$table)
+tabbest <- getBestTest(cluster.CD4T.vs.MB$indices[[1]], results.CD4T.vs.MB$table)
+
+tabstats <- data.frame(tabcom[,-5], logFC=tabbest$logFC, FDR=cluster.CD4T.vs.MB$FDR)
+results.CD4T.vs.MB <- cbind(as.data.frame(as.data.frame(cluster.CD4T.vs.MB$interactions)[,c(1:3, 6:8)]), tabstats)
+
+head(results.CD4T.vs.MB)
+```
+We create an object with all the stats in it:
+```{r}
+is.sig <- !is.na(cluster.CD4T.vs.MB$indices[[1]])
+cluster.CD4T.vs.MB$indices[[1]] <- cluster.CD4T.vs.MB$indices[[1]][is.sig]
+cluster.CD4T.vs.MB$data <- data[is.sig,c(1,2,5,6)]
+mcols(cluster.CD4T.vs.MB$interactions) <- cbind(mcols(cluster.CD4T.vs.MB$interactions), tabstats)
+
+head(cluster.CD4T.vs.MB$interactions)
+```
+
+We can now look at the number of clusters DIs and the direction:
+```{r}
+data.frame(Total=nrow(results.CD4T.vs.MB), Down=sum(results.CD4T.vs.MB$direction == "down"), Up=sum(results.CD4T.vs.MB$direction == "up"))
+```
+
+Lets look at the top DIs:
+```{r}
+stat.CD4T.vs.MB<-results.CD4T.vs.MB[order(results.CD4T.vs.MB$PValue),]
+head(stat.CD4T.vs.MB)
+```
+
+# Exercise: Differential interactions between CD4+ T cells and granulocytes
+
+# Visualisation of differential interactions with plaid plots
+Plaid plots are widely used to visualize the distribution of read pairs in the interaction space. In these plots, each axis is a chromosome segment. Each “pixel” represents an interaction between the corresponding intervals on each axis. The color of the pixel is proportional to the number of read pairs mapped between the interacting loci. diffHic provides two different functions to produce plaid plots from the hd5 file of a library.
+
+We are using smaller hd5f files for plotting:
+```{r}
+files<- paste0("data/",targets$library[c(1,3,5)], "chr2_chr11_chr12.h5")
+files
+```
+
+We will plot an interactions from the CD4+ T cell versus MB comparison on chromosome 12: 
+```{r}
+chosen <-cluster.CD4T.vs.MB$interactions[order(results.CD4T.vs.MB$PValue)][1]
+chosen
+```
+
+Now we can use the plotPlaid function with the hdf5s to plot our region of interest in the CD4+ T cells and granulocytes.
+```{r, fig.width=10}
+# Setting up the interaction space to be plotted.
+chosen.a1 <- anchors(chosen, type="first")
+chosen.a2 <- anchors(chosen, type="second")
+expanded1 <- resize(chosen.a1, fix="center", width=bin.size*35)
+expanded2 <- resize(chosen.a2, fix="center", width=bin.size*35)
+
+cap <- 200
+scaled <- (data$totals[c(1,3,5)])/max(data$totals[c(1,3,5)])
+cap.scaled<-cap*scaled
+
+# Plotting the WT library.
+par(mfrow=c(1,2))
+plotPlaid(files[1], first=expanded1, second=expanded2, max.count=cap.scaled[1], width=5e4, param=hs.param, main="CD4+ T1")
+
+plotPlaid(files[3], first=expanded1, second=expanded2, max.count=cap.scaled[3],width=5e4, param=hs.param, main="MB1")
+```
+
+Alternatively, users may prefer to use rotPlaid to generate rotated plaid plots. These are more space-efficient and are easier to stack onto other genomic tracks, e.g., for ChIP-seq
+data. However, rotated plots are only effective for local interactions within a specified region.
+```{r, fig.width=14, fig.height=6}
+chosen.r <- anchors(chosen, type="second")
+end(chosen.r) <- end(anchors(chosen, type="first"))
+chosen.r<-resize(chosen.r, width = width(chosen.r)+500e3, fix = "center")
+
+par(mfrow=c(1,2))
+rotPlaid(files[1], hs.param, region=chosen.r, width=5e4, main="CD4+ T1", max.count=cap.scaled[1])
+rotPlaid(files[3], hs.param, region=chosen.r, width=5e4, main="MB1", max.count=cap.scaled[3])
+```
+
+We want to plot the entire chromosome with the DI highlighted in red:
+```{r, fig.width=16,fig.height=16}
+chrom12<-GRanges(c("chr12"), IRanges(c(6e6), c(118e6)))
+cap <- 2000
+cap.scaled<-cap*scaled
+
+# Plotting the WT library.
+par(mfrow=c(1,2))
+plotPlaid(files[1], first=chrom12, second=chrom12, max.count=cap.scaled[1],
+width=5e5, param=hs.param, main="CD4+ T1")
+rect(start(chosen.a1), start(chosen.a2), end(chosen.a1), end(chosen.a2), col="red")
+
+plotPlaid(files[3], first=chrom12, second=chrom12, max.count=cap.scaled[3],
+width=5e5, param=hs.param, main="MB1")
+rect(start(chosen.a1), start(chosen.a2), end(chosen.a1), end(chosen.a2), col="red")
+```
+
+# Exercise: Plot a similar DI from the CD4+ T versus Grans
+
+# Exercise: Perform the differential analysis with the bin.size=1 Mbp data:
+
+I start it off with the filtering...
+```{r}
+bin.size <- 1e6
+data<-background
+    
+direct <- filterDirect(data) #we don't need to use a reference.
+direct$threshold
+```
+
+# Session information
+```{r} 
+sessionInfo()
+```
+
