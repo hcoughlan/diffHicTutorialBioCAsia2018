@@ -1,5 +1,5 @@
 # diffHic Tutorial for BioCAsia2018
-Here is all the material for the Bioconductor Hands-on Training Day workshop "Differential analysis of HiC data with diffHic".
+Here is all the material for the Bioconductor Hands-on Training Day workshop "Differential analysis of HiC data with diffHic". A bioconductor package created by [Aaron Lun](https://support.bioconductor.org/u/6732/) and [Gordon Smyth](https://support.bioconductor.org/u/179/) to find differential chromatin structure in HiC data. 
 
 Additional resources for the workshop:
 * [diffHic](https://bioconductor.org/packages/release/bioc/html/diffHic.html) - DiffHic bioconductor page
