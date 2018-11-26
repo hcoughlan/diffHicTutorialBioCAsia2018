@@ -265,7 +265,7 @@ This is just one method of filtering HiC data which I have found to be a good ge
 ## Normalisation
 Many different methods of normalisation can be explored to remove biases in the HiC data. It is important to remember that this is a differential type analysis therefore we do not need to correct the counts. Instead diffHic computes offsets that are used in fitting generalised linear models (GLMs) to the data.
 
-Trended biases can be introduced to the libraries through the complicated experimental protocol of HiC (such as cross-linking efficieny, ligation). Scalling methods such TMM normalisation are too simplistic to deal with the complex biases observed in real HiC data. 
+Trended biases can be introduced to the libraries through the complicated experimental protocol of HiC (such as cross-linking efficiency, ligation). Scalling methods such TMM normalisation are too simplistic to deal with the complex biases observed in real HiC data. 
 
 Trended biases can inflate the variance estimates or fold-changes for some pairs. These type of biases can be eliminated with a non-linear normalisation and here we will use LOESS normalisation. The normOffsetrs function from the csaw package is used to compute an offset term for each bin pair in each library. 
 
@@ -318,6 +318,7 @@ y
 An effective method to explore the data is with a multi-dimensional scaling plot (MDS). The function plotMDS from the limma package draws a MDS plot of the samples in which distances correspond to leading log-fold-changes between each pair of samples. The leading log-fold-change is the average (root-mean-square) of the largest absolute log-fold changes between each pair. This plot can be viewed as a type of unsupervised clustering. Here we plot an MDS for the normalised cpms for the top 50,000 bins:
 
 ```{r, fig.height=6,fig.width=}
+library(limma)
 par(mfrow=c(1,1))
 group.col <-c("green","green","red","red","blue","blue")
 plotMDS(normc, col=group.col,pch = as.numeric(19), top=50000, cex=2, dim.plot = c(1,2), main = "HiC MDS plot, 50000")
@@ -344,7 +345,8 @@ An estimation of the variation in the bin pairs is used during testing to reduce
 
 The biological coefficient of variation (BCV) is estimated by fitting an abundance-dependent trend to the NB dispersions across all bin pairs. The NB dispersions represent the level of biological variability between replicates and the square root of NB dispersions is the BCV, i.e., the coefficient of variation with which the count for each bin pair varies between the replicate samples, averaged over bin pairs with similar abundances. It represents the coefficient of variation that would be observed in the counts if the sequencing depth was sufficiently large (i.e. no technical variation).
 
-We estimate the NB dispersions with the estimateDisp function with robust=TRUE to protect from outliners.
+We estimate the NB dispersions with the estimateDisp function with robust=TRUE to protect from outliers.
+
 ```{r} 
 dispersion <- estimateDisp(y, design,robust=TRUE)
 ```
@@ -355,7 +357,7 @@ BCV <- sqrt(dispersion$common.dispersion)
 BCV
 ```
 
-This is a reasonable BVC for HiC data. We can also visualise the BCV for every bin pair and examine the trend as a function of abundance. 
+This is a reasonable BCV for HiC data. We can also visualise the BCV for every bin pair and examine the trend as a function of abundance. 
 
 A plot of the average $\log_2$-count per million (CPM) versus the BCV for each bin pair is shown below. This plot visualises how bin pair variation changes between replicate samples changes as abundance increases. Ideally we want the BCV to decrease as abundance increases. 
 ```{r, fig.height=6,fig.width=6}
@@ -368,7 +370,7 @@ The QL dispersion is estimated in the GLM fitting which we will now perform.
 ## Fitting the GLM
 Counts for each bin pair are modelled using the GLM methods implemented in the edgeR package and takes into account the sequencing depth and the normalisation offsets we calculated previously. 
 
-The QL dispersion for each bin pair is estimated from the deviance of the fitted GLM. The QL dispersion can account for heteroskedasticity between bin pairs. QL dispersion is estimated with the glmQLFit. The information is shared between bin pairs using an empirical Bayes (EB) approach. Per-bin pair QL estimates are shrunk towards a common trend across all bin pairs. Again, it is important to use the robust=TRUE argument as this protects against any large outliners.
+The QL dispersion for each bin pair is estimated from the deviance of the fitted GLM. The QL dispersion can account for heteroskedasticity between bin pairs. QL dispersion is estimated with the glmQLFit. The information is shared between bin pairs using an empirical Bayes (EB) approach. Per-bin pair QL estimates are shrunk towards a common trend across all bin pairs. Again, it is important to use the robust=TRUE argument as this protects against any large outliers.
 ```{r, fig.height=6,fig.width=6}
 par(mfrow=c(1,1))
 fit <- glmQLFit(dispersion, design, robust=TRUE)
