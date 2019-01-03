@@ -498,7 +498,7 @@ cap.scaled<-cap*scaled
 par(mfrow=c(1,2))
 plotPlaid(files[1], first=expanded1, second=expanded2, max.count=cap.scaled[1], width=5e4, param=hs.param, main="CD4+ T1")
 
-plotPlaid(files[3], first=expanded1, second=expanded2, max.count=cap.scaled[3],width=5e4, param=hs.param, main="MB1")
+plotPlaid(files[3], first=expanded1, second=expanded2, max.count=cap.scaled[2],width=5e4, param=hs.param, main="MB1")
 ```
 
 Alternatively, users may prefer to use rotPlaid to generate rotated plaid plots. These are more space-efficient and are easier to stack onto other genomic tracks, e.g., for ChIP-seq
@@ -510,7 +510,7 @@ chosen.r<-resize(chosen.r, width = width(chosen.r)+500e3, fix = "center")
 
 par(mfrow=c(1,2))
 rotPlaid(files[1], hs.param, region=chosen.r, width=5e4, main="CD4+ T1", max.count=cap.scaled[1])
-rotPlaid(files[3], hs.param, region=chosen.r, width=5e4, main="MB1", max.count=cap.scaled[3])
+rotPlaid(files[3], hs.param, region=chosen.r, width=5e4, main="MB1", max.count=cap.scaled[2])
 ```
 
 We want to plot the entire chromosome with the DI highlighted in red:
@@ -525,7 +525,7 @@ plotPlaid(files[1], first=chrom12, second=chrom12, max.count=cap.scaled[1],
 width=5e5, param=hs.param, main="CD4+ T1")
 rect(start(chosen.a1), start(chosen.a2), end(chosen.a1), end(chosen.a2), col="red")
 
-plotPlaid(files[3], first=chrom12, second=chrom12, max.count=cap.scaled[3],
+plotPlaid(files[3], first=chrom12, second=chrom12, max.count=cap.scaled[2],
 width=5e5, param=hs.param, main="MB1")
 rect(start(chosen.a1), start(chosen.a2), end(chosen.a1), end(chosen.a2), col="red")
 ```
